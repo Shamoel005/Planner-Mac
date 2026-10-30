@@ -193,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.isOpaque = false
         w.backgroundColor = .clear
         w.hasShadow = true
+        w.appearance = NSAppearance(named: .darkAqua)
         w.level = deskLevel
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         w.contentView = NSHostingView(rootView: RootView().environmentObject(store))
@@ -267,6 +268,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Visuals
 
+enum Theme {
+    static let accent = Color(red: 0.49, green: 0.40, blue: 1.00)
+    static let pink = Color(red: 1.00, green: 0.38, blue: 0.62)
+    static let tabColors: [Color] = [
+        Color(red: 1.00, green: 0.55, blue: 0.30),   // Today: sunset orange
+        Color(red: 0.30, green: 0.62, blue: 1.00),   // Tasks: azure
+        Color(red: 0.25, green: 0.85, blue: 0.65),   // Goals: mint
+        Color(red: 1.00, green: 0.40, blue: 0.48),   // Habits: coral
+        Color(red: 1.00, green: 0.80, blue: 0.30),   // Notes: gold
+        Color(red: 0.66, green: 0.46, blue: 1.00)    // Focus: violet
+    ]
+}
+
+private struct TintKey: EnvironmentKey { static let defaultValue = Theme.accent }
+extension EnvironmentValues {
+    var tintC: Color {
+        get { self[TintKey.self] }
+        set { self[TintKey.self] = newValue }
+    }
+}
+
 struct VisualEffect: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let v = NSVisualEffectView()
@@ -279,14 +301,16 @@ struct VisualEffect: NSViewRepresentable {
 }
 
 struct Ring: View {
+    @Environment(\.tintC) var tintC
     var progress: Double
     var label: String
     var body: some View {
         ZStack {
-            Circle().stroke(Color.primary.opacity(0.10), lineWidth: 6)
+            Circle().stroke(Color.white.opacity(0.16), lineWidth: 6)
             Circle()
                 .trim(from: 0, to: CGFloat(min(max(progress, 0), 1)))
-                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(LinearGradient(colors: [tintC, Theme.pink], startPoint: .topLeading, endPoint: .bottomTrailing), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .shadow(color: tintC.opacity(0.7), radius: 5)
                 .rotationEffect(.degrees(-90))
                 .animation(.easeOut(duration: 0.4), value: progress)
             Text(label).font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -341,7 +365,8 @@ struct RowCard<Content: View>: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.11)))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
     }
 }
 
@@ -373,6 +398,8 @@ struct RootView: View {
     @StateObject var focus = FocusModel()
     @State private var tab = 0
     @State private var draft = ""
+
+    var tintC: Color { Theme.tabColors[tab] }
 
     let icons = ["sun.max", "checklist", "target", "flame", "note.text", "timer"]
     let names = ["Today", "Tasks", "Goals", "Habits", "Notes", "Focus"]
@@ -416,13 +443,19 @@ struct RootView: View {
     var body: some View {
         ZStack {
             VisualEffect()
+            LinearGradient(
+                colors: [tintC.opacity(0.55), Color(red: 0.35, green: 0.20, blue: 0.75).opacity(0.45), Color(red: 0.08, green: 0.08, blue: 0.28).opacity(0.55)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            Circle().fill(tintC.opacity(0.40)).frame(width: 260, height: 260).blur(radius: 70).offset(x: 110, y: -190)
+            Circle().fill(Theme.pink.opacity(0.28)).frame(width: 230, height: 230).blur(radius: 70).offset(x: -120, y: 200)
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(dateString)
                             .font(.system(size: 11, weight: .semibold))
                             .tracking(0.8)
-                            .foregroundStyle(Color.secondary)
+                            .foregroundStyle(tintC)
                         Text(names[tab])
                             .font(.system(size: 30, weight: .bold, design: .rounded))
                     }
@@ -451,9 +484,11 @@ struct RootView: View {
             }
         }
         .environmentObject(focus)
+        .environment(\.tintC, tintC)
+        .animation(.easeInOut(duration: 0.35), value: tab)
         .frame(width: 340, height: 540)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(LinearGradient(colors: [Color.white.opacity(0.45), Color.white.opacity(0.06)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
     }
 
     var tabBar: some View {
@@ -465,10 +500,10 @@ struct RootView: View {
                     Image(systemName: icons[i])
                         .font(.system(size: 14, weight: .medium))
                         .frame(maxWidth: .infinity, minHeight: 30)
-                        .foregroundStyle(tab == i ? Color.primary : Color.secondary)
+                        .foregroundStyle(tab == i ? Color.white : Color.white.opacity(0.55))
                         .background(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(tab == i ? Color.primary.opacity(0.13) : Color.clear)
+                                .fill(tab == i ? tintC.opacity(0.45) : Color.clear)
                         )
                 }
                 .buttonStyle(.plain)
@@ -476,13 +511,13 @@ struct RootView: View {
             }
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.10)))
         .padding(.horizontal, 16)
     }
 
     var addBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "plus.circle.fill").foregroundStyle(Color.accentColor)
+            Image(systemName: "plus.circle.fill").foregroundStyle(tintC)
             TextField(placeholders[tab], text: $draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
@@ -490,7 +525,8 @@ struct RootView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.08)))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.14)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         .padding(16)
     }
 
@@ -593,6 +629,7 @@ struct NotesView: View {
 }
 
 struct FocusView: View {
+    @Environment(\.tintC) var tintC
     @EnvironmentObject var focus: FocusModel
     var body: some View {
         VStack(spacing: 18) {
@@ -601,6 +638,7 @@ struct FocusView: View {
                 .font(.system(size: 66, weight: .thin, design: .rounded))
                 .monospacedDigit()
             ProgressView(value: 1 - Double(focus.left) / Double(max(focus.total, 1)))
+                .tint(tintC)
                 .padding(.horizontal, 40)
             HStack(spacing: 8) {
                 ForEach([15, 25, 45], id: \.self) { m in
@@ -617,7 +655,7 @@ struct FocusView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.white)
                     .padding(.horizontal, 22).padding(.vertical, 9)
-                    .background(Capsule().fill(Color.accentColor))
+                    .background(Capsule().fill(tintC))
                 Button("Reset") { focus.reset() }
                     .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
@@ -633,6 +671,7 @@ struct FocusView: View {
 // MARK: - Rows
 
 struct TaskRow: View {
+    @Environment(\.tintC) var tintC
     @EnvironmentObject var store: Store
     let item: Item
     @State private var showPick = false
@@ -647,7 +686,7 @@ struct TaskRow: View {
                 } label: {
                     Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 19))
-                        .foregroundStyle(item.done ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(item.done ? tintC : Color.secondary)
                 }
                 .buttonStyle(.plain)
 
@@ -706,6 +745,7 @@ struct TaskRow: View {
 }
 
 struct GoalRow: View {
+    @Environment(\.tintC) var tintC
     @EnvironmentObject var store: Store
     let item: Item
 
@@ -718,7 +758,7 @@ struct GoalRow: View {
                         Text(item.scope.uppercased() + " GOAL")
                             .font(.system(size: 9.5, weight: .bold))
                             .tracking(0.6)
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(tintC)
                         Text(item.title).font(.system(size: 14, weight: .semibold))
                     }
                     Spacer()
@@ -744,7 +784,7 @@ struct GoalRow: View {
                     .menuIndicator(.hidden)
                     .frame(width: 22)
                 }
-                ProgressView(value: p)
+                ProgressView(value: p).tint(tintC)
                 HStack {
                     Text("\(item.current) of \(item.target)")
                         .font(.system(size: 11))
@@ -769,6 +809,7 @@ struct GoalRow: View {
 }
 
 struct HabitRow: View {
+    @Environment(\.tintC) var tintC
     @EnvironmentObject var store: Store
     let item: Item
     let compact: Bool
@@ -796,7 +837,7 @@ struct HabitRow: View {
                     } label: {
                         Image(systemName: doneToday ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 22))
-                            .foregroundStyle(doneToday ? Color.accentColor : Color.secondary)
+                            .foregroundStyle(doneToday ? tintC : Color.secondary)
                     }
                     .buttonStyle(.plain)
                     if !compact {
@@ -815,7 +856,7 @@ struct HabitRow: View {
                         ForEach((0..<7).reversed(), id: \.self) { b in
                             VStack(spacing: 4) {
                                 Circle()
-                                    .fill(set.contains(dayKey(-b)) ? Color.accentColor : Color.primary.opacity(0.12))
+                                    .fill(set.contains(dayKey(-b)) ? tintC : Color.white.opacity(0.18))
                                     .frame(width: 10, height: 10)
                                 Text(dayLetter(b)).font(.system(size: 9)).foregroundStyle(Color.secondary)
                             }
@@ -829,6 +870,7 @@ struct HabitRow: View {
 }
 
 struct NoteRow: View {
+    @Environment(\.tintC) var tintC
     @EnvironmentObject var store: Store
     let item: Item
 
@@ -854,7 +896,7 @@ struct NoteRow: View {
                     } label: {
                         Image(systemName: item.pinned ? "pin.fill" : "pin")
                             .font(.system(size: 11))
-                            .foregroundStyle(item.pinned ? Color.accentColor : Color.secondary)
+                            .foregroundStyle(item.pinned ? tintC : Color.secondary)
                     }
                     .buttonStyle(.plain)
                     Button {

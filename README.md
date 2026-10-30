@@ -20,4 +20,4 @@ swift build -c release
 Or push to GitHub and download the app from the Actions artifacts. On first launch, right-click the app and choose **Open** (it is ad-hoc signed).
 
 ## Author
-Built by Shamoel Farooqui
+Built by - Shamoel Farooqui

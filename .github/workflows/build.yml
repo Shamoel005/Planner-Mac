@@ -1,0 +1,25 @@
+name: Build Mac widget app
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (Apple Silicon + Intel)
+        run: swift build -c release --arch arm64 --arch x86_64
+      - name: Package app
+        run: |
+          BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
+          APP=MyPlanner.app
+          mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
+          cp "$BIN/MyPlanner" $APP/Contents/MacOS/MyPlanner
+          cp Info.plist $APP/Contents/Info.plist
+          codesign --force --deep --sign - $APP
+          ditto -c -k --keepParent $APP MyPlanner-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyPlanner-mac
+          path: MyPlanner-mac.zip

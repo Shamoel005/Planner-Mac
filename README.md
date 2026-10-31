@@ -8,6 +8,7 @@ Part of the **My Planner** project (see the Android app in the main repo). Both 
 - Translucent frosted-glass panel pinned at desktop level, with a colour theme per tab
 - Menu-bar item: show/hide, keep above windows, launch at login, backup/restore
 - Today, Tasks, Goals, Habits, Notes and a Focus timer
+- **Budget tracker:** log expenses by category, set a monthly budget, see today's spend, what's left and a daily allowance, plus a 7-day chart
 - Universal binary (Apple Silicon + Intel), built with GitHub Actions
 
 ## Tech
@@ -20,4 +21,4 @@ swift build -c release
 Or push to GitHub and download the app from the Actions artifacts. On first launch, right-click the app and choose **Open** (it is ad-hoc signed).
 
 ## Author
-Built by - Shamoel Farooqui
+Built by **[Md Shamoel Farooqui]**.

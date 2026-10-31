@@ -180,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: DeskWindow!
     var statusItem: NSStatusItem!
     let store = Store()
+    let budget = BudgetStore()
     var onTop = false
     let deskLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
 
@@ -196,7 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.appearance = NSAppearance(named: .darkAqua)
         w.level = deskLevel
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        w.contentView = NSHostingView(rootView: RootView().environmentObject(store))
+        w.contentView = NSHostingView(rootView: RootView().environmentObject(store).environmentObject(budget))
 
         let restored = w.setFrameUsingName("PlannerPanel")
         if !restored, let s = NSScreen.main {
@@ -277,6 +278,7 @@ enum Theme {
         Color(red: 0.25, green: 0.85, blue: 0.65),   // Goals: mint
         Color(red: 1.00, green: 0.40, blue: 0.48),   // Habits: coral
         Color(red: 1.00, green: 0.80, blue: 0.30),   // Notes: gold
+        Color(red: 1.00, green: 0.45, blue: 0.80),   // Budget: rose
         Color(red: 0.66, green: 0.46, blue: 1.00)    // Focus: violet
     ]
 }
@@ -395,14 +397,15 @@ final class FocusModel: ObservableObject {
 
 struct RootView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var budget: BudgetStore
     @StateObject var focus = FocusModel()
     @State private var tab = 0
     @State private var draft = ""
 
     var tintC: Color { Theme.tabColors[tab] }
 
-    let icons = ["sun.max", "checklist", "target", "flame", "note.text", "timer"]
-    let names = ["Today", "Tasks", "Goals", "Habits", "Notes", "Focus"]
+    let icons = ["sun.max", "checklist", "target", "flame", "note.text", "creditcard", "timer"]
+    let names = ["Today", "Tasks", "Goals", "Habits", "Notes", "Budget", "Focus"]
     let kinds = ["task", "task", "goal", "habit", "note"]
     let placeholders = ["Add a task for today", "Add a task", "Add a goal", "Add a habit", "Write a note"]
 
@@ -429,6 +432,10 @@ struct RootView: View {
             return (h.isEmpty ? 0 : Double(d) / Double(h.count), "\(d)/\(h.count)")
         case 4:
             return (0, "\(store.items.filter { $0.kind == "note" }.count)")
+        case 5:
+            let lim = budget.data.monthly
+            let r = lim > 0 ? min(1, budget.monthSpent / lim) : 0
+            return (r, lim > 0 ? "\(Int(r * 100))%" : "--")
         default:
             return nil
         }
@@ -475,6 +482,7 @@ struct RootView: View {
                     case 2: GoalsView()
                     case 3: HabitsView()
                     case 4: NotesView()
+                    case 5: BudgetView()
                     default: FocusView()
                     }
                 }
@@ -906,6 +914,323 @@ struct NoteRow: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Budget
+
+enum Cat: String, CaseIterable {
+    case food = "Food", transport = "Transport", shopping = "Shopping"
+    case bills = "Bills", health = "Health", leisure = "Fun", other = "Other"
+
+    var icon: String {
+        switch self {
+        case .food: return "fork.knife"
+        case .transport: return "car.fill"
+        case .shopping: return "bag.fill"
+        case .bills: return "bolt.fill"
+        case .health: return "cross.case.fill"
+        case .leisure: return "gamecontroller.fill"
+        case .other: return "ellipsis.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .food: return Color(red: 1.00, green: 0.60, blue: 0.30)
+        case .transport: return Color(red: 0.30, green: 0.62, blue: 1.00)
+        case .shopping: return Color(red: 1.00, green: 0.45, blue: 0.80)
+        case .bills: return Color(red: 1.00, green: 0.80, blue: 0.30)
+        case .health: return Color(red: 0.30, green: 0.85, blue: 0.60)
+        case .leisure: return Color(red: 0.66, green: 0.46, blue: 1.00)
+        case .other: return Color(red: 0.65, green: 0.70, blue: 0.80)
+        }
+    }
+}
+
+func money(_ v: Double) -> String {
+    let f = NumberFormatter()
+    f.numberStyle = .currency
+    f.currencySymbol = "₹"
+    f.locale = Locale(identifier: "en_IN")
+    f.maximumFractionDigits = 0
+    return f.string(from: NSNumber(value: v)) ?? "₹\(Int(v))"
+}
+
+struct Expense: Identifiable, Codable, Equatable {
+    var id: Int64
+    var amount: Double
+    var category: String
+    var note: String
+    var date: Int64
+}
+
+struct BudgetData: Codable {
+    var monthly: Double = 0
+    var expenses: [Expense] = []
+}
+
+final class BudgetStore: ObservableObject {
+    @Published var data = BudgetData() { didSet { save() } }
+    private let url: URL
+
+    init() {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("MyPlanner", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        url = dir.appendingPathComponent("budget.json")
+        if let d = try? Data(contentsOf: url), let v = try? JSONDecoder().decode(BudgetData.self, from: d) {
+            data = v
+        }
+    }
+
+    private func save() {
+        if let d = try? JSONEncoder().encode(data) { try? d.write(to: url, options: .atomic) }
+    }
+
+    func monthStart() -> Int64 {
+        let c = Calendar.current
+        return msOf(c.date(from: c.dateComponents([.year, .month], from: Date())) ?? Date())
+    }
+
+    var monthSpent: Double {
+        let s = monthStart()
+        return data.expenses.filter { $0.date >= s }.reduce(0) { $0 + $1.amount }
+    }
+
+    func monthTotal(_ c: Cat) -> Double {
+        let s = monthStart()
+        return data.expenses.filter { $0.date >= s && $0.category == c.rawValue }.reduce(0) { $0 + $1.amount }
+    }
+
+    var daysLeft: Int {
+        let cal = Calendar.current
+        let n = cal.range(of: .day, in: .month, for: Date())?.count ?? 30
+        return max(1, n - cal.component(.day, from: Date()) + 1)
+    }
+
+    var todayList: [Expense] {
+        let s = dayStartMs()
+        let e = dayEndMs(0)
+        return data.expenses.filter { $0.date >= s && $0.date <= e }
+    }
+
+    func spent(offset: Int) -> Double {
+        let cal = Calendar.current
+        let d = cal.date(byAdding: .day, value: offset, to: Date()) ?? Date()
+        let s = msOf(cal.startOfDay(for: d))
+        let e = endOfDayMs(d)
+        return data.expenses.filter { $0.date >= s && $0.date <= e }.reduce(0) { $0 + $1.amount }
+    }
+}
+
+struct BudgetView: View {
+    @EnvironmentObject var budget: BudgetStore
+    @Environment(\.tintC) var tintC
+    @State private var amountText = ""
+    @State private var noteText = ""
+    @State private var cat: Cat = .food
+    @State private var editBudget = false
+    @State private var budgetText = ""
+
+    func parse(_ t: String) -> Double? {
+        Double(t.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces))
+    }
+
+    func addExpense() {
+        guard let a = parse(amountText), a > 0 else { return }
+        let e = Expense(
+            id: nowMs(), amount: a, category: cat.rawValue,
+            note: noteText.trimmingCharacters(in: .whitespacesAndNewlines), date: nowMs()
+        )
+        budget.data.expenses.insert(e, at: 0)
+        amountText = ""
+        noteText = ""
+    }
+
+    func commitBudget() {
+        if let v = parse(budgetText), v >= 0 { budget.data.monthly = v }
+        editBudget = false
+    }
+
+    var body: some View {
+        let spent = budget.monthSpent
+        let limit = budget.data.monthly
+        let left = limit - spent
+        let ratio = limit > 0 ? min(1, spent / limit) : 0
+        let over = limit > 0 && spent > limit
+        let today = budget.todayList
+        let cats = Cat.allCases.filter { budget.monthTotal($0) > 0 }.sorted { budget.monthTotal($0) > budget.monthTotal($1) }
+        let week = (0..<7).map { budget.spent(offset: -$0) }
+        let maxDay = max(week.max() ?? 1, 1)
+
+        Page {
+            RowCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("THIS MONTH")
+                            .font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
+                            .foregroundStyle(Color.secondary)
+                        Spacer()
+                        Button(editBudget ? "Save" : (limit > 0 ? "Edit budget" : "Set budget")) {
+                            if editBudget { commitBudget() }
+                            else { budgetText = limit > 0 ? String(Int(limit)) : ""; editBudget = true }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(tintC)
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(money(spent)).font(.system(size: 30, weight: .bold, design: .rounded))
+                        if limit > 0 {
+                            Text("of \(money(limit))").font(.system(size: 13)).foregroundStyle(Color.secondary)
+                        }
+                    }
+                    if editBudget {
+                        TextField("Monthly budget in ₹", text: $budgetText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 14))
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.12)))
+                            .onSubmit { commitBudget() }
+                    }
+                    if limit > 0 {
+                        ProgressView(value: ratio).tint(over ? Color.red : tintC)
+                        Text(over ? "Over budget by \(money(-left))" : "\(money(left)) left · about \(money(left / Double(budget.daysLeft))) a day")
+                            .font(.system(size: 11))
+                            .foregroundStyle(over ? Color.red : Color.secondary)
+                    } else if !editBudget {
+                        Text("Set a monthly budget to track what's left.")
+                            .font(.system(size: 11)).foregroundStyle(Color.secondary)
+                    }
+                }
+            }
+
+            RowCard {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("TODAY")
+                            .font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
+                            .foregroundStyle(Color.secondary)
+                        Text(money(budget.spent(offset: 0)))
+                            .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    }
+                    Spacer()
+                    Text("\(today.count) expense\(today.count == 1 ? "" : "s")")
+                        .font(.system(size: 12)).foregroundStyle(Color.secondary)
+                }
+            }
+
+            RowCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Text("₹").font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(tintC)
+                        TextField("Amount", text: $amountText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .onSubmit { addExpense() }
+                    }
+                    TextField("What was it for? (optional)", text: $noteText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .onSubmit { addExpense() }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Cat.allCases, id: \.self) { c in
+                                Button { cat = c } label: {
+                                    Label(c.rawValue, systemImage: c.icon)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .padding(.horizontal, 10).padding(.vertical, 6)
+                                        .background(Capsule().fill(cat == c ? c.color.opacity(0.55) : Color.white.opacity(0.10)))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    Button { addExpense() } label: {
+                        Text("Add expense")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(tintC))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            SectionLabel("Today's expenses")
+            if today.isEmpty { EmptyHint("No spending logged today") }
+            ForEach(today) { ExpenseRow(e: $0) }
+
+            SectionLabel("Last 7 days")
+            RowCard {
+                HStack(alignment: .bottom, spacing: 6) {
+                    ForEach((0..<7).reversed(), id: \.self) { b in
+                        let v = week[b]
+                        VStack(spacing: 4) {
+                            Spacer(minLength: 0)
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(v > 0 ? tintC : Color.white.opacity(0.15))
+                                .frame(height: max(4, CGFloat(v / maxDay) * 46))
+                            Text(dayLetter(b)).font(.system(size: 9)).foregroundStyle(Color.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: 70)
+            }
+
+            SectionLabel("This month by category")
+            if cats.isEmpty { EmptyHint("No spending yet this month") }
+            ForEach(cats, id: \.self) { c in
+                let t = budget.monthTotal(c)
+                RowCard {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: c.icon).foregroundStyle(c.color).font(.system(size: 12))
+                            Text(c.rawValue).font(.system(size: 13, weight: .medium))
+                            Spacer()
+                            Text(money(t)).font(.system(size: 13, weight: .semibold, design: .rounded))
+                        }
+                        ProgressView(value: spent > 0 ? t / spent : 0).tint(c.color)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ExpenseRow: View {
+    @EnvironmentObject var budget: BudgetStore
+    let e: Expense
+
+    var body: some View {
+        let c = Cat(rawValue: e.category) ?? .other
+        let f = DateFormatter()
+        let _ = f.dateFormat = "h:mm a"
+        RowCard {
+            HStack(spacing: 10) {
+                Image(systemName: c.icon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(c.color.opacity(0.7)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(e.note.isEmpty ? e.category : e.note).font(.system(size: 13, weight: .medium))
+                    Text(e.category + " · " + f.string(from: Date(timeIntervalSince1970: Double(e.date) / 1000)))
+                        .font(.system(size: 11)).foregroundStyle(Color.secondary)
+                }
+                Spacer()
+                Text(money(e.amount)).font(.system(size: 14, weight: .semibold, design: .rounded))
+                Button {
+                    budget.data.expenses.removeAll { $0.id == e.id }
+                } label: {
+                    Image(systemName: "trash").font(.system(size: 11)).foregroundStyle(Color.secondary)
+                }
+                .buttonStyle(.plain)
             }
         }
     }

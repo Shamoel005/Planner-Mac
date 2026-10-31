@@ -1034,20 +1034,25 @@ struct BudgetView: View {
     @State private var cat: Cat = .food
     @State private var editBudget = false
     @State private var budgetText = ""
+    @State private var showError = false
+    @FocusState private var amountFocused: Bool
 
     func parse(_ t: String) -> Double? {
         Double(t.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces))
     }
 
     func addExpense() {
-        guard let a = parse(amountText), a > 0 else { return }
-        let e = Expense(
-            id: nowMs(), amount: a, category: cat.rawValue,
-            note: noteText.trimmingCharacters(in: .whitespacesAndNewlines), date: nowMs()
-        )
+        var amt = parse(amountText) ?? 0
+        var note = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // If the number was typed in the note box by mistake, use it as the amount.
+        if amt <= 0, let n = parse(note), n > 0 { amt = n; note = "" }
+        guard amt > 0 else { showError = true; return }
+        let e = Expense(id: nowMs(), amount: amt, category: cat.rawValue, note: note, date: nowMs())
         budget.data.expenses.insert(e, at: 0)
         amountText = ""
         noteText = ""
+        showError = false
+        amountFocused = true
     }
 
     func commitBudget() {
@@ -1125,17 +1130,31 @@ struct BudgetView: View {
 
             RowCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) {
-                        Text("₹").font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(tintC)
+                    HStack(spacing: 8) {
+                        Text("₹").font(.system(size: 20, weight: .bold, design: .rounded)).foregroundStyle(tintC)
                         TextField("Amount", text: $amountText)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
+                            .focused($amountFocused)
+                            .onSubmit { addExpense() }
+                            .onChange(of: amountText) { _ in showError = false }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.12)))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(showError ? Color.red : Color.clear, lineWidth: 1.5))
+                    HStack(spacing: 8) {
+                        Image(systemName: "text.alignleft").font(.system(size: 11)).foregroundStyle(Color.secondary)
+                        TextField("What was it for? (optional)", text: $noteText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
                             .onSubmit { addExpense() }
                     }
-                    TextField("What was it for? (optional)", text: $noteText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .onSubmit { addExpense() }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.08)))
+                    if showError {
+                        Text("Type an amount first, like 130")
+                            .font(.system(size: 11)).foregroundStyle(Color.red)
+                    }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(Cat.allCases, id: \.self) { c in
